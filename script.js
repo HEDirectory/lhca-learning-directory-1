@@ -483,7 +483,7 @@ function toggleProviderExpanded() {
   updateProviderList();
 }
 
-async function renderCourses() {
+async function renderCourses(resetDisplayCount = false) {
   const query = searchInput.value;
   const selectedProviders = getSelectedProviders();
   const selectedCategories = getSelectedCategories();
@@ -502,8 +502,7 @@ async function renderCourses() {
     matchesTargetAudience(course, selectedTargetAudiences)
   );
 
-  // Reset display count when filters change
-  currentDisplayCount = COURSES_PER_PAGE;
+  if (resetDisplayCount) currentDisplayCount = COURSES_PER_PAGE;
 
   resultsList.innerHTML = '';
 
@@ -593,7 +592,7 @@ async function renderCourses() {
 }
 
 function handleFilterChange() {
-  renderCourses();
+  renderCourses(true);
 }
 
 async function initializePortal() {
@@ -645,10 +644,10 @@ async function initializePortal() {
     // Attach event listeners
     document.getElementById('providerSearch').addEventListener('input', updateProviderList);
     document.getElementById('showMoreProviders').addEventListener('click', toggleProviderExpanded);
-    searchInput.addEventListener('input', renderCourses);
+    searchInput.addEventListener('input', () => renderCourses(true));
     clearSearchButton.addEventListener('click', () => {
       searchInput.value = '';
-      renderCourses();
+      renderCourses(true);
     });
 
 
