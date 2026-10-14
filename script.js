@@ -389,8 +389,10 @@ function handleCheckboxChange(event) {
     const selectAll = container.querySelector('.select-all-checkbox');
     if (selectAll) selectAll.checked = false;
   } else if (cb.checked) {
-    // Normal behavior: make this the only checked box in the group
-    checkboxes.forEach(c => { if (c !== cb) c.checked = false; });
+    // Categories support combining multiple checked options.
+    if (name !== 'category') {
+      checkboxes.forEach(c => { if (c !== cb) c.checked = false; });
+    }
     const selectAll = container.querySelector('.select-all-checkbox');
     if (selectAll) selectAll.checked = false;
   } else {
