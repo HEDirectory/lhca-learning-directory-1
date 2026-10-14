@@ -548,7 +548,7 @@ async function renderCourses(resetDisplayCount = false) {
       <div>
         <h3>${course.title}</h3>
         <div class="course-meta">
-          <span><strong>Provider:</strong> ${course.provider || 'Not specified'}</span>
+          <span>• <strong>Provider:</strong> ${course.provider || 'Not specified'}</span>
           <span>• <strong>Delivery:</strong> ${course.delivery_mode || 'N/A'}</span>
           <span>• <strong>Duration:</strong> ${course.duration || 'N/A'}</span>
           <span>• <strong>Cost:</strong> ${costLabel}</span>
