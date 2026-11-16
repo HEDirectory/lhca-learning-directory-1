@@ -364,6 +364,7 @@ function createCoursePayload(formData) {
     category: formatArrayField(formData.get('category')),
     asset_category: formData.get('asset_category')?.toString().trim() || null,
     review_status: formData.get('review_status')?.toString().trim() || 'Draft',
+    course_expires: formData.get('course_expires')?.toString().trim() || null,
     image_url: formData.get('image_url')?.toString().trim() || null,
     url: formData.get('url')?.toString().trim() || null,
     updated_at: new Date().toISOString(),
@@ -392,6 +393,7 @@ function setFormMode(isEditing, course = null) {
     document.getElementById('durationCategory').value = course.duration_category || '';
     document.getElementById('assetCategory').value = course.asset_category || '';
     document.getElementById('reviewStatus').value = course.review_status || 'Draft';
+    document.getElementById('courseExpires').value = course.course_expires ? String(course.course_expires).slice(0, 10) : '';
     document.getElementById('imageUrl').value = course.image_url || '';
     document.getElementById('category').value = formatValue(course.category);
     document.getElementById('targetAudience').value = formatValue(course.target_audience);
@@ -449,6 +451,15 @@ async function fetchCourses() {
   }
 
   try {
+    try {
+      const expiryResponse = await fetch('/api/courses/expire', { method: 'POST' });
+      if (!expiryResponse.ok) {
+        throw new Error(`Expiry update failed: ${expiryResponse.status}`);
+      }
+    } catch (error) {
+      console.warn('Unable to update expired course statuses:', error);
+    }
+
     const data = await supabase.request('GET', '/rest/v1/courses_new?select=*&order=created_at.desc', null, accessToken);
     cachedCourses = Array.isArray(data) ? data : [];
     // initialize filtering and pagination

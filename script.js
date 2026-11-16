@@ -84,7 +84,9 @@ function normalize(value) {
 
 function isPublicCourse(course) {
   const reviewStatus = String(course?.review_status || '').trim();
-  return reviewStatus.toLowerCase() !== 'archived';
+  const expiryDate = String(course?.course_expires || '').slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  return reviewStatus.toLowerCase() !== 'archived' && (!expiryDate || expiryDate >= today);
 }
 
 function selectCourseThumbnail(course) {
@@ -599,6 +601,15 @@ function handleFilterChange() {
 
 async function initializePortal() {
   try {
+    try {
+      const expiryResponse = await fetch('/api/courses/expire', { method: 'POST' });
+      if (!expiryResponse.ok) {
+        throw new Error(`Expiry update failed: ${expiryResponse.status}`);
+      }
+    } catch (error) {
+      console.warn('Unable to update expired course statuses:', error);
+    }
+
     // Fetch all courses from Supabase
     allCourses = (await supabase.getCourses()).filter(isPublicCourse);
     
