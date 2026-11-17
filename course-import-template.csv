@@ -1,0 +1,2 @@
+title,description,provider,url,delivery_mode,duration,access,education_outcome,cost_category,cost_gbp,category,target_audience,duration_category,asset_category,image_url,course_expires,recency
+"Example course - delete this row","A short 2-4 sentence summary of what this course covers, written in your own words.","Example Training Ltd","https://example.com/healthcare-course",Online,"3 hours","Register on website","Certificate of completion",Paid,45,"Safeguarding, Mental health","All (health, social care, VSO)","Less than a day",Course,,,"Posted within 1 month"

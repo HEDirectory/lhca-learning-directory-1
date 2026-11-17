@@ -93,6 +93,28 @@
           </div>
           <div id="coursesList" class="course-manager-list"></div>
         </div>
+        <!-- CSV import panel: bulk-add courses extracted by the AI research skill -->
+        <div class="form-card import-card">
+          <div class="section-heading">
+            <div>
+              <h2>Import Courses from CSV</h2>
+              <p class="section-description">
+                Bulk-add courses collected by the AI research skill (see <code>scrape-skill.md</code>).
+                Download the template, upload the completed CSV, check the preview, then import.
+                New rows are added as <strong>Draft</strong> so you can review them before approval.
+              </p>
+            </div>
+            <a href="course-import-template.csv" download class="btn btn-secondary">Download Template</a>
+          </div>
+          <div class="import-controls">
+            <label for="courseCsvFile" class="btn btn-primary">Choose CSV file…</label>
+            <input type="file" id="courseCsvFile" accept=".csv,text/csv" hidden />
+            <span id="importFileName" class="import-file-name">No file selected</span>
+            <button id="courseImportBtn" type="button" class="btn btn-primary" disabled>Import as Draft</button>
+          </div>
+          <div id="importPreview" class="import-preview" hidden></div>
+          <p class="form-message" id="importMessage"></p>
+        </div>
         <!-- Course form panel: add new entries or edit an existing one -->
         <div class="form-card add-course-card">
           <div class="section-heading">

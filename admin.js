@@ -27,6 +27,12 @@ const prevPageBtn = document.getElementById('prevPageBtn');
 const nextPageBtn = document.getElementById('nextPageBtn');
 const showMoreBtn = document.getElementById('showMoreBtn');
 const pageInfo = document.getElementById('pageInfo');
+// DOM references for the CSV import flow.
+const courseCsvFile = document.getElementById('courseCsvFile');
+const courseImportBtn = document.getElementById('courseImportBtn');
+const importFileName = document.getElementById('importFileName');
+const importPreview = document.getElementById('importPreview');
+const importMessage = document.getElementById('importMessage');
 
 // Shared state for pagination, filtering and editing.
 let currentEditingCourseId = null;
@@ -35,6 +41,7 @@ let filteredCourses = [];
 let currentPage = 1;
 let perPage = 25;
 let currentReviewStatusFilter = '';
+let pendingImportRows = [];
 
 // Small helper wrapper around Supabase auth and REST calls.
 const supabase = {
@@ -660,12 +667,450 @@ async function handleCourseListAction(event) {
   }
 }
 
+// ------------------------------------------------------------------
+// CSV import (AI research skill bulk upload)
+// ------------------------------------------------------------------
+const IMPORT_REVIEW_STATUS = 'Draft';
+
+// Header aliases used when matching an uploaded CSV to the courses_new schema.
+const IMPORT_FIELD_ALIASES = {
+  title: ['title', 'course title', 'course'],
+  description: ['description', 'course description', 'summary', 'overview'],
+  provider: ['provider', 'course provider', 'organisation', 'organization'],
+  url: ['url', 'course url', 'link', 'course link'],
+  delivery_mode: ['delivery_mode', 'delivery mode', 'delivery'],
+  duration: ['duration', 'course duration'],
+  access: ['access', 'how to access', 'booking'],
+  education_outcome: ['education_outcome', 'education outcome', 'outcome', 'qualification'],
+  cost_category: ['cost_category', 'cost category', 'cost'],
+  cost_gbp: ['cost_gbp', 'cost gbp', 'cost (gbp)', 'cost (£)', 'price', 'price (gbp)', 'price (£)'],
+  category: ['category', 'categories', 'topic', 'topics'],
+  target_audience: ['target_audience', 'target audience', 'audience'],
+  duration_category: ['duration_category', 'duration category'],
+  asset_category: ['asset_category', 'asset category'],
+  image_url: ['image_url', 'image url', 'image'],
+  course_expires: ['course_expires', 'course expiry date', 'expiry date', 'expires', 'expiry'],
+};
+
+const IMPORT_DELIVERY_MODES = ['Online', 'Face to Face', 'Hybrid', 'NA'];
+const IMPORT_COST_CATEGORIES = ['Free', 'Paid', 'TBC', 'NA'];
+const IMPORT_DURATION_CATEGORIES = ['Less than an hour', 'Less than a day', 'Less than a week', 'Less than a year', 'Various'];
+
+function escapeHtml(value) {
+  return String(value === null || value === undefined ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function normalizeHeaderName(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function mapCsvHeader(header) {
+  const normalized = normalizeHeaderName(header);
+  for (const [field, aliases] of Object.entries(IMPORT_FIELD_ALIASES)) {
+    if (aliases.some(alias => normalizeHeaderName(alias) === normalized)) {
+      return field;
+    }
+  }
+  return null;
+}
+
+// Robust CSV parser: quoted fields, embedded commas, escaped quotes, CRLF.
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  const source = String(text || '').replace(/^\uFEFF/, '');
+
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+
+    if (inQuotes) {
+      if (ch === '"') {
+        if (source[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(field);
+      field = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && source[i + 1] === '\n') {
+        i += 1;
+      }
+      row.push(field);
+      field = '';
+      if (row.some(cell => String(cell).trim() !== '')) {
+        rows.push(row);
+      }
+      row = [];
+    } else {
+      field += ch;
+    }
+  }
+
+  row.push(field);
+  if (row.some(cell => String(cell).trim() !== '')) {
+    rows.push(row);
+  }
+  return rows;
+}
+
+function setImportMessage(message, isError = false) {
+  if (isError) {
+    importMessage.classList.add('error');
+  } else {
+    importMessage.classList.remove('error');
+  }
+  importMessage.textContent = message;
+}
+
+function handleCourseCsvFileSelected(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) {
+    return;
+  }
+
+  setImportMessage('');
+  importFileName.textContent = file.name;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const rows = parseCSV(String(reader.result || ''));
+      if (rows.length < 2) {
+        throw new Error('The file needs a header row plus at least one course row.');
+      }
+
+      const fields = rows[0].map(mapCsvHeader);
+      const dataRows = rows.slice(1).map(row => {
+        const record = {};
+        fields.forEach((field, index) => {
+          if (field && row[index] !== undefined) {
+            record[field] = String(row[index]).trim();
+          }
+        });
+        return record;
+      });
+
+      pendingImportRows = dataRows;
+      renderImportPreview(dataRows);
+    } catch (error) {
+      console.error('CSV parse failed:', error);
+      pendingImportRows = [];
+      renderImportPreview([]);
+      setImportMessage(`Unable to read CSV: ${error.message}`, true);
+    }
+  };
+  reader.onerror = () => {
+    setImportMessage('Unable to read the selected file. Please try again.', true);
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function normalizeUrlForDedupe(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .split('#')[0]
+    .split('?')[0]
+    .replace(/\/+$/, '');
+}
+
+function isDuplicateCourse({ url, title }) {
+  const normUrl = normalizeUrlForDedupe(url);
+  const normTitle = String(title || '').trim().toLowerCase();
+
+  return (cachedCourses || []).some(course => {
+    const courseUrl = normalizeUrlForDedupe(course.url);
+    const courseTitle = String(course.title || '').trim().toLowerCase();
+    return (
+      (normUrl && courseUrl && normUrl === courseUrl) ||
+      (normTitle && courseTitle && normTitle === courseTitle)
+    );
+  });
+}
+
+function inferDurationCategory(durationText) {
+  const lower = String(durationText || '').toLowerCase();
+  if (/(\d+)\s*min|minutes?\b/.test(lower)) return 'Less than an hour';
+  if (/(\d+)\s*hour/.test(lower)) return 'Less than a day';
+  if (/weeks?\b/.test(lower)) return 'Less than a week';
+  if (/(\d+)\s*days?\b/.test(lower)) return 'Less than a day';
+  if (/months?\b|years?\b/.test(lower)) return 'Less than a year';
+  if (/varies|various|flexible/.test(lower)) return 'Various';
+  return '';
+}
+
+// Split comma-separated values, keeping parenthesised groups intact
+// (e.g. "All (health, social care, VSO)" stays as one item).
+function formatImportArray(value) {
+  if (!value) return [];
+  const parts = [];
+  let current = '';
+  let depth = 0;
+  for (const ch of String(value)) {
+    if (ch === '(') depth += 1;
+    if (ch === ')') depth = Math.max(0, depth - 1);
+    if ((ch === ',' || ch === ';' || ch === '\n') && depth === 0) {
+      if (current.trim()) parts.push(current.trim());
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) parts.push(current.trim());
+  return parts;
+}
+
+// Turn one CSV row into a payload matching the courses_new table.
+function normalizeImportCourse(raw) {
+  const title = String(raw.title || '').trim();
+  const provider = String(raw.provider || '').trim();
+  if (!title || !provider) {
+    return { error: 'Missing required field (title / provider)' };
+  }
+
+  let deliveryMode = String(raw.delivery_mode || '').trim();
+  if (deliveryMode && !IMPORT_DELIVERY_MODES.includes(deliveryMode)) {
+    const lower = deliveryMode.toLowerCase();
+    if (lower.includes('online') && (lower.includes('face') || lower.includes('classroom'))) {
+      deliveryMode = 'Hybrid';
+    } else if (lower.includes('online')) {
+      deliveryMode = 'Online';
+    } else if (lower.includes('face') || lower.includes('classroom') || lower.includes('in person') || lower.includes('in-person')) {
+      deliveryMode = 'Face to Face';
+    } else {
+      deliveryMode = 'NA';
+    }
+  }
+
+  let costCategory = String(raw.cost_category || '').trim();
+  if (costCategory && !IMPORT_COST_CATEGORIES.includes(costCategory)) {
+    const lower = costCategory.toLowerCase();
+    if (lower.includes('free')) {
+      costCategory = 'Free';
+    } else if (lower.includes('paid') || lower.includes('£') || lower.includes('gbp') || lower.includes('price')) {
+      costCategory = 'Paid';
+    } else {
+      costCategory = 'TBC';
+    }
+  }
+
+  const costRaw = String(raw.cost_gbp || '').replace(/[£,€\s]/g, '');
+  const costNumber = Number(costRaw);
+  const costGbp = Number.isFinite(costNumber) ? Math.max(0, costNumber) : 0;
+
+  const duration = String(raw.duration || '').trim();
+  let durationCategory = String(raw.duration_category || '').trim();
+  if (durationCategory && !IMPORT_DURATION_CATEGORIES.includes(durationCategory)) {
+    durationCategory = '';
+  }
+  if (!durationCategory && duration) {
+    durationCategory = inferDurationCategory(duration);
+  }
+
+  const courseExpiresRaw = String(raw.course_expires || '').trim();
+  const courseExpires = /^\d{4}-\d{2}-\d{2}$/.test(courseExpiresRaw) ? courseExpiresRaw : null;
+
+  return {
+    payload: {
+      title,
+      description: String(raw.description || '').trim() || 'No description provided.',
+      provider,
+      url: String(raw.url || '').trim() || null,
+      delivery_mode: deliveryMode || 'NA',
+      duration: duration || 'NA',
+      access: String(raw.access || '').trim() || 'NA',
+      education_outcome: String(raw.education_outcome || '').trim() || 'NA',
+      cost_category: costCategory || 'NA',
+      cost_gbp: costGbp,
+      category: formatImportArray(raw.category),
+      target_audience: formatImportArray(raw.target_audience),
+      duration_category: durationCategory || null,
+      asset_category: String(raw.asset_category || '').trim() || null,
+      image_url: String(raw.image_url || '').trim() || null,
+      review_status: IMPORT_REVIEW_STATUS,
+      course_expires: courseExpires,
+      updated_at: new Date().toISOString(),
+    },
+    url: String(raw.url || '').trim(),
+    title,
+  };
+}
+
+function renderImportPreview(rows) {
+  importPreview.innerHTML = '';
+  importPreview.hidden = true;
+  courseImportBtn.disabled = true;
+  setImportMessage('');
+
+  if (!rows.length) {
+    return;
+  }
+
+  const headers = ['Title', 'Provider', 'URL', 'Delivery', 'Cost', 'Categories', 'Status'];
+  const seenInFile = new Set();
+
+  const body = rows.map(raw => {
+    const normalized = normalizeImportCourse(raw);
+    let status;
+    let statusClass;
+
+    if (normalized.error) {
+      status = normalized.error;
+      statusClass = 'import-status-failed';
+    } else {
+      const key = normalizeUrlForDedupe(normalized.url) || String(normalized.title).trim().toLowerCase();
+      if (isDuplicateCourse(normalized) || seenInFile.has(key)) {
+        status = 'Duplicate - will be skipped';
+        statusClass = 'import-status-dup';
+      } else {
+        status = 'New - will be added as Draft';
+        statusClass = 'import-status-new';
+      }
+      seenInFile.add(key);
+    }
+
+    return `
+      <tr>
+        <td>${escapeHtml(raw.title || '')}</td>
+        <td>${escapeHtml(raw.provider || '')}</td>
+        <td class="import-cell-url" title="${escapeHtml(raw.url || '')}">${escapeHtml(raw.url || '')}</td>
+        <td>${escapeHtml(raw.delivery_mode || '')}</td>
+        <td>${escapeHtml(raw.cost_category || '')}</td>
+        <td>${escapeHtml(raw.category || '')}</td>
+        <td><span class="${statusClass}">${escapeHtml(status)}</span></td>
+      </tr>`;
+  }).join('');
+
+  importPreview.innerHTML = `
+    <table class="import-table">
+      <thead><tr>${headers.map(header => `<th>${header}</th>`).join('')}</tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    <p class="import-summary">${rows.length} row(s) loaded. Duplicates are detected against the current catalogue and within the file, and are skipped automatically.</p>`;
+  importPreview.hidden = false;
+  courseImportBtn.disabled = false;
+}
+
+function renderImportResults(detailRows, results) {
+  const body = detailRows.map(row => `
+    <tr>
+      <td>${escapeHtml(row.title)}</td>
+      <td><span class="${row.statusClass}">${escapeHtml(row.status)}</span></td>
+    </tr>`).join('');
+
+  importPreview.innerHTML = `
+    <table class="import-table">
+      <thead><tr><th>Title</th><th>Result</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table>
+    <p class="import-summary"><strong>${results.imported}</strong> imported as Draft &bull; <strong>${results.skipped}</strong> duplicates skipped &bull; <strong>${results.failed}</strong> failed</p>`;
+  importPreview.hidden = false;
+}
+
+async function handleCourseCsvImport() {
+  if (!pendingImportRows || !pendingImportRows.length) {
+    setImportMessage('Choose a CSV file first, then press Import.', true);
+    return;
+  }
+
+  const accessToken = await getValidAccessToken();
+  if (!accessToken) {
+    setImportMessage('Your session has expired. Please sign in again.', true);
+    setAuthVisibility(false);
+    return;
+  }
+
+  courseImportBtn.disabled = true;
+  courseImportBtn.textContent = 'Importing…';
+  setImportMessage('');
+
+  const results = { imported: 0, skipped: 0, failed: 0 };
+  const detailRows = [];
+  const seenThisRun = new Set();
+
+  for (const raw of pendingImportRows) {
+    const normalized = normalizeImportCourse(raw);
+
+    if (normalized.error) {
+      results.failed += 1;
+      detailRows.push({
+        title: raw.title || '(untitled)',
+        status: normalized.error,
+        statusClass: 'import-status-failed',
+      });
+      continue;
+    }
+
+    const key = normalizeUrlForDedupe(normalized.url) || String(normalized.title).trim().toLowerCase();
+    if (isDuplicateCourse(normalized) || seenThisRun.has(key)) {
+      results.skipped += 1;
+      detailRows.push({
+        title: normalized.title,
+        status: 'Duplicate - skipped',
+        statusClass: 'import-status-dup',
+      });
+      continue;
+    }
+
+    try {
+      await supabase.request('POST', '/rest/v1/courses_new', normalized.payload, accessToken);
+      seenThisRun.add(key);
+      results.imported += 1;
+      detailRows.push({
+        title: normalized.title,
+        status: 'Imported as Draft',
+        statusClass: 'import-status-imported',
+      });
+    } catch (error) {
+      console.error('Course import failed:', error);
+      results.failed += 1;
+      detailRows.push({
+        title: normalized.title,
+        status: `Failed: ${error.message}`,
+        statusClass: 'import-status-failed',
+      });
+    }
+  }
+
+  renderImportResults(detailRows, results);
+  setImportMessage(`Import complete - ${results.imported} added as Draft, ${results.skipped} duplicates skipped, ${results.failed} failed.`);
+  if (results.failed > 0) {
+    importMessage.classList.add('error');
+  }
+
+  courseImportBtn.disabled = false;
+  courseImportBtn.textContent = 'Import as Draft';
+  await fetchCourses();
+}
+
 function initAdminPanel() {
   loginForm.addEventListener('submit', handleLogin);
   logoutBtn.addEventListener('click', handleLogout);
   courseForm.addEventListener('submit', handleCourseSubmit);
   coursesList.addEventListener('click', handleCourseListAction);
   refreshCoursesBtn.addEventListener('click', fetchCourses);
+  if (courseCsvFile) {
+    courseCsvFile.addEventListener('change', handleCourseCsvFileSelected);
+  }
+  if (courseImportBtn) {
+    courseImportBtn.addEventListener('click', handleCourseCsvImport);
+  }
   if (reviewStatusFilter) {
     reviewStatusFilter.addEventListener('change', (e) => {
       currentReviewStatusFilter = e.target.value;

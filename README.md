@@ -18,6 +18,15 @@ The public site reads course data from Supabase. The admin area uses Vercel API 
 
 Open [index.html](index.html) in a browser, or run the project through a local static preview tool such as Live Server in VS Code.
 
+## Course discovery (AI-assisted import)
+
+The directory can be grown from public-web research using free AI assistants, at zero cost:
+
+- **`scrape-skill.md`** — a reusable research prompt ("skill") that finds healthcare courses on the public web and returns them in a CSV matching the `courses_new` table.
+- **`course-import-template.csv`** — the CSV template with the same columns.
+
+Workflow: run a session in a free AI assistant (Gemini recommended) using the skill prompt, download the CSV, then use the admin area's **Import Courses from CSV** panel to add the rows as **Draft** and review before approving.
+
 ## Deployment
 
 This project is deployed through Vercel and connected to the GitHub repository. Push to the main branch to trigger a deployment.

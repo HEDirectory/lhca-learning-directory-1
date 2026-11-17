@@ -146,3 +146,24 @@ small { font-size: 0.9rem; color: var(--text-secondary); }
 .pagination button.btn-primary { background: var(--primary-blue); color: white; }
 @media (max-width: 800px) { .form-row { grid-template-columns: 1fr; } .section-heading, .course-manager-card { flex-direction: column; } .course-manager-actions { width: 100%; } .course-manager-actions button { flex: 1; } }
 @media (max-width: 640px) { .site-header { flex-direction: column; align-items: flex-start; } .auth-section, .dashboard-section { padding: 1.5rem; } }
+
+/* CSV import panel */
+.import-card { background: #f7fbff; border-color: rgba(56, 135, 173, 0.16); }
+.import-card .section-heading { margin-bottom: 1.25rem; }
+.import-card .section-description strong, .import-card .section-description code { color: var(--primary-teal); }
+.import-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.85rem; margin-bottom: 0.5rem; }
+.import-controls .btn { min-height: 3rem; }
+.import-controls label.btn { cursor: pointer; font-weight: 700; }
+.import-file-name { color: var(--text-secondary); font-size: 0.95rem; }
+.import-preview { margin-top: 1rem; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.import-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; background: var(--surface); }
+.import-table th, .import-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.import-table th { background: var(--surface-alt); color: var(--text-secondary); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.import-table tr:last-child td { border-bottom: none; }
+.import-cell-url { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.import-summary { margin: 0.75rem 1rem; color: var(--text-secondary); font-size: 0.95rem; }
+.import-status-new { color: var(--primary-blue); font-weight: 700; }
+.import-status-dup { color: #92400e; font-weight: 700; }
+.import-status-imported { color: #15803d; font-weight: 700; }
+.import-status-failed { color: #b91c1c; font-weight: 700; }
+.form-message.error { color: #b91c1c; }
